@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Company Hiring Dashboard</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <style>
+      :root { --bg:#eef4fb; --card:#fff; --ink:#132238; --muted:#63748e; --line:#d6e0ef; --accent:#1785ff; --soft:#dcecff; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+        color: var(--ink);
+        background: radial-gradient(circle at 0 0, #e8f1ff 0, transparent 35%), radial-gradient(circle at 100% 100%, #daf3ff 0, transparent 40%), var(--bg);
+      }
+      .page { width:min(98vw, 1800px); margin:10px auto; display:grid; grid-template-columns:250px 1fr 400px; gap:12px; }
+      .panel { background:var(--card); border:1px solid var(--line); border-radius:14px; }
+      .left,.main,.right { min-height:calc(100vh - 22px); padding:12px; }
+      .brand { font-size:20px; font-weight:800; margin-bottom:8px; }
+      .subtitle,.muted { font-size:12px; color:var(--muted); }
+      .company-list { display:grid; gap:8px; margin-top:10px; }
+      .company-btn { width:100%; text-align:left; border:1px solid var(--line); background:#f9fbff; color:var(--ink); border-radius:10px; padding:10px 12px; cursor:pointer; font-weight:600; display:flex; align-items:center; gap:8px; }
+      .company-btn.active { background:linear-gradient(135deg,#0e79ff,#3fa1ff); color:#fff; border-color:transparent; }
+      .company-logo { width:18px; height:18px; object-fit:contain; flex:0 0 auto; }
+      .company-logo-fallback { width:18px; height:18px; border-radius:50%; background:#d7e7ff; color:#295078; display:none; align-items:center; justify-content:center; font-size:10px; font-weight:700; flex:0 0 auto; }
+      .company-btn.active .company-logo-fallback { background:rgba(255,255,255,.2); color:#fff; }
+      .topbar { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
+      .title { font-size:30px; font-weight:800; }
+      .filters { display:flex; gap:8px; flex-wrap:wrap; }
+      .trend-filters { display:flex; gap:8px; flex-wrap:wrap; margin:0 0 10px; }
+      select,input,button { border:1px solid var(--line); background:#fff; border-radius:10px; padding:8px 12px; color:var(--ink); }
+      button { border:none; background:linear-gradient(135deg,#1280ff,#4aa8ff); color:#fff; cursor:pointer; }
+      .card { border:1px solid #e9eff9; border-radius:12px; padding:10px; background:#fcfdff; margin-bottom:10px; }
+      .card h3,.list-title { margin:0 0 8px; font-size:16px; font-weight:700; }
+      #worldMap { width:100%; height:500px; border:1px solid #dce5f5; border-radius:10px; overflow:hidden; }
+      .legend { display:flex; align-items:center; gap:8px; margin-top:8px; font-size:12px; color:var(--muted); }
+      .legend-bar { flex:1; height:8px; border-radius:99px; background:linear-gradient(90deg,#e8f0ff,#1785ff); }
+      #trend { width:100%; height:180px; }
+      .right-tools { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
+      .country-list { display:grid; gap:7px; max-height:calc(100vh - 170px); overflow:auto; padding-right:4px; }
+      .row { display:grid; grid-template-columns:44px 52px 1fr; gap:8px; align-items:center; font-size:13px; }
+      .country-chip { display:flex; align-items:center; gap:6px; }
+      .flag-img { width:18px; height:12px; border:1px solid #c9d8ec; border-radius:2px; object-fit:cover; flex:0 0 auto; background:#f2f6fc; }
+      .bar { height:8px; border-radius:99px; background:var(--soft); overflow:hidden; }
+      .bar i { display:block; height:100%; background:linear-gradient(90deg,var(--accent),#53b2ff); }
+      #mapTooltip { position:fixed; pointer-events:none; background:rgba(19,34,56,.95); color:#fff; padding:6px 8px; border-radius:6px; font-size:12px; opacity:0; z-index:9999; }
+      @media (max-width:1200px) { .page { grid-template-columns:1fr; } .left,.main,.right { min-height:auto; } .country-list { max-height:420px; } }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <aside class="panel left">
+        <div class="brand">CompanyLoc</div>
+        <div class="subtitle">Company Navigation</div>
+        <div id="companyList" class="company-list"></div>
+      </aside>
+
+      <main class="panel main">
+        <div class="topbar">
+          <div class="title">Global Hiring Map</div>
+        </div>
+        <div class="card">
+          <h3>Interactive Map</h3>
+          <div class="muted" id="snapshotText">Loading...</div>
+          <div id="worldMap"></div>
+          <div class="legend"><span id="legendMin">0</span><div class="legend-bar"></div><span id="legendMax">0</span></div>
+          <div class="muted">Google-Maps style drag/zoom, click a country to filter trend.</div>
+        </div>
+        <div class="card">
+          <h3>Monthly Trend (Avg)</h3>
+          <div class="trend-filters">
+            <select id="countrySelect"><option value="">All Countries</option></select>
+            <select id="fromMonth"><option value="">From Month</option></select>
+            <select id="toMonth"><option value="">To Month</option></select>
+            <label class="muted" style="display:flex;align-items:center;gap:6px;padding:0 4px;"><input id="hideUnknown" type="checkbox" checked />Hide Remote</label>
+            <button id="reloadBtn">Reload</button>
+            <button id="resetMapBtn" type="button">Reset Map</button>
+          </div>
+          <svg id="trend" viewBox="0 0 900 180" preserveAspectRatio="none"></svg>
+          <div class="muted" id="trendHint"></div>
+        </div>
+      </main>
+
+      <section class="panel right">
+        <div class="list-title">Country Jobs Distribution</div>
+        <div class="right-tools">
+          <label class="muted">Top</label>
+          <select id="topN"><option value="10">10</option><option value="20" selected>20</option><option value="50">50</option><option value="9999">All</option></select>
+        </div>
+        <div class="muted" id="rightHint"></div>
+        <div id="countryRows" class="country-list"></div>
+      </section>
+    </div>
+
+    <div id="mapTooltip"></div>
+    <select id="companySelect" style="display:none;"></select>
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script>
+      const companySelect = document.getElementById("companySelect");
+      const companyList = document.getElementById("companyList");
+      const countrySelect = document.getElementById("countrySelect");
+      const fromMonthInput = document.getElementById("fromMonth");
+      const toMonthInput = document.getElementById("toMonth");
+      const hideUnknownInput = document.getElementById("hideUnknown");
+      const topNSelect = document.getElementById("topN");
+      const countryRows = document.getElementById("countryRows");
+      const rightHint = document.getElementById("rightHint");
+      const snapshotText = document.getElementById("snapshotText");
+      const trendSvg = document.getElementById("trend");
+      const trendHint = document.getElementById("trendHint");
+      const reloadBtn = document.getElementById("reloadBtn");
+      const resetMapBtn = document.getElementById("resetMapBtn");
+      const legendMin = document.getElementById("legendMin");
+      const legendMax = document.getElementById("legendMax");
+      const mapTooltip = document.getElementById("mapTooltip");
+
+      let worldGeoJson = null;
+      let currentCountryJobs = {};
+      let currentCountries = [];
+      let currentRemoteJobs = 0;
+      let map = null;
+      let geoLayer = null;
+      let geoLayersByIso2 = {};
+      let hoveredIso2 = null;
+      let selectedIso2 = null;
+      let currentMapMax = 1;
+      let availableMonths = [];
+
+      const ISO3_TO_ISO2 = { USA:"US",CAN:"CA",MEX:"MX",BRA:"BR",ARG:"AR",COL:"CO",GBR:"GB",IRL:"IE",FRA:"FR",DEU:"DE",ESP:"ES",ITA:"IT",NLD:"NL",BEL:"BE",CHE:"CH",AUT:"AT",DNK:"DK",SWE:"SE",NOR:"NO",FIN:"FI",POL:"PL",CZE:"CZ",SVK:"SK",HUN:"HU",ROU:"RO",BGR:"BG",GRC:"GR",HRV:"HR",SVN:"SI",SRB:"RS",UKR:"UA",TUR:"TR",MAR:"MA",EGY:"EG",ZAF:"ZA",SAU:"SA",ISR:"IL",IRQ:"IQ",IND:"IN",PAK:"PK",CHN:"CN",JPN:"JP",KOR:"KR",TWN:"TW",SGP:"SG",MYS:"MY",THA:"TH",IDN:"ID",VNM:"VN",PHL:"PH",AUS:"AU",NZL:"NZ",ARM:"AM",AZE:"AZ" };
+      const COMPANY_LOGOS = {
+        amazon: "https://www.amazon.com/favicon.ico",
+        apple: "https://cdn.simpleicons.org/apple/111111",
+        google: "https://www.google.com/images/branding/googleg/1x/googleg_standard_color_128dp.png",
+        intel: "https://cdn.simpleicons.org/intel/0071C5",
+        meta: "https://cdn.simpleicons.org/meta/0866FF",
+        microsoft: "https://www.microsoft.com/favicon.ico",
+        nvidia: "https://cdn.simpleicons.org/nvidia/76B900",
+        nokia: "https://www.nokia.com/favicon.ico"
+      };
+
+      async function getJson(url) { const r = await fetch(url); if (!r.ok) throw new Error(`${r.status} ${r.statusText}`); return r.json(); }
+      function featureIso2(f) { const p = f.properties || {}; const raw = (f.id || p.iso_a2 || p.ISO_A2 || "").toUpperCase(); if (raw.length === 2) return raw; if (raw.length === 3 && ISO3_TO_ISO2[raw]) return ISO3_TO_ISO2[raw]; return null; }
+      function featureName(f) { const p = f.properties || {}; return p.name || p.NAME || p.admin || p.ADMIN || "Unknown"; }
+      function escapeHtml(v) { return String(v || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&#39;"); }
+      function companyLogoUrl(name) {
+        const k = String(name || "").trim().toLowerCase();
+        return COMPANY_LOGOS[k] || "";
+      }
+      function companyInitial(name) {
+        const s = String(name || "").trim();
+        return s ? s[0].toUpperCase() : "?";
+      }
+      function iso2ToFlag(iso2) {
+        const s = String(iso2 || "").toUpperCase();
+        if (!/^[A-Z]{2}$/.test(s)) return "";
+        const base = 127397;
+        return String.fromCodePoint(...[...s].map(ch => base + ch.charCodeAt(0)));
+      }
+      function countryLabel(iso2) {
+        const flag = iso2ToFlag(iso2);
+        return `${flag ? `${flag} ` : ""}${iso2 || "UN"}`;
+      }
+      function countryText(iso2) {
+        const code = String(iso2 || "UN").toUpperCase();
+        return code === "UN" ? "REMOTE" : code;
+      }
+      function countryFlagImg(iso2) {
+        const code = countryText(iso2);
+        if (!/^[A-Z]{2}$/.test(code) || code === "UN") return "";
+        const lc = code.toLowerCase();
+        return `<img class="flag-img" src="https://flagcdn.com/w20/${lc}.png" srcset="https://flagcdn.com/w40/${lc}.png 2x" alt="${code} flag" loading="lazy" />`;
+      }
+      function fmtNum(v) {
+        return Math.ceil(Number(v || 0)).toLocaleString();
+      }
+      function ymFromSnapshot(snapshotMonth) {
+        return String(snapshotMonth || "").slice(0, 7);
+      }
+      function monthIndex(ym) {
+        const [y, m] = String(ym || "").split("-").map(x => parseInt(x, 10));
+        if (!Number.isFinite(y) || !Number.isFinite(m)) return null;
+        return (y * 12) + (m - 1);
+      }
+      function monthSpanInclusive(fromYm, toYm) {
+        const a = monthIndex(fromYm);
+        const b = monthIndex(toYm);
+        if (a === null || b === null) return 0;
+        return Math.abs(b - a) + 1;
+      }
+      function syncMonthOptions(items) {
+        const months = [...new Set((items || []).map(x => ymFromSnapshot(x.snapshot_month)).filter(Boolean))].sort();
+        availableMonths = months;
+        const prevFrom = fromMonthInput.value;
+        const prevTo = toMonthInput.value;
+
+        fromMonthInput.innerHTML = ['<option value="">From Month</option>'].concat(months.map(m => `<option value="${m}">${m}</option>`)).join("");
+        toMonthInput.innerHTML = ['<option value="">To Month</option>'].concat(months.map(m => `<option value="${m}">${m}</option>`)).join("");
+
+        if (!months.length) return;
+
+        fromMonthInput.value = months.includes(prevFrom) ? prevFrom : months[0];
+        toMonthInput.value = months.includes(prevTo) ? prevTo : months[months.length - 1];
+        enforceMaxRange("to");
+      }
+      function enforceMaxRange(changedField) {
+        const from = fromMonthInput.value;
+        const to = toMonthInput.value;
+        if (!from || !to) return;
+
+        const fromPos = availableMonths.indexOf(from);
+        const toPos = availableMonths.indexOf(to);
+        if (fromPos === -1 || toPos === -1) return;
+
+        let f = fromPos;
+        let t = toPos;
+        if (f > t) {
+          if (changedField === "from") t = f;
+          else f = t;
+        }
+        if ((t - f + 1) > 12) {
+          if (changedField === "from") t = Math.min(f + 11, availableMonths.length - 1);
+          else f = Math.max(t - 11, 0);
+        }
+        fromMonthInput.value = availableMonths[f];
+        toMonthInput.value = availableMonths[t];
+      }
+
+      function renderCompanyNav(items) {
+        companyList.innerHTML = items.map(c => {
+          const logo = companyLogoUrl(c.name);
+          const name = escapeHtml(c.name);
+          const initial = companyInitial(c.name);
+          const noLogo = logo ? "" : "display:none;";
+          const noLogoFallback = logo ? "display:none;" : "display:inline-flex;";
+          return `<button class="company-btn ${c.id===companySelect.value?"active":""}" data-id="${c.id}">
+            <img class="company-logo" src="${logo}" alt="${name} logo" style="${noLogo}" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='inline-flex';" />
+            <span class="company-logo-fallback" style="${noLogoFallback}">${escapeHtml(initial)}</span>
+            <span>${name}</span>
+          </button>`;
+        }).join("");
+        [...companyList.querySelectorAll(".company-btn")].forEach(btn => btn.addEventListener("click", async () => {
+          companySelect.value = btn.dataset.id;
+          [...companyList.querySelectorAll(".company-btn")].forEach(b => b.classList.remove("active"));
+          btn.classList.add("active");
+          await loadDashboard();
+        }));
+      }
+
+      function visibleCountries(countries) {
+        let out = [...countries];
+        if (hideUnknownInput.checked) out = out.filter(c => c.country_norm !== "UN");
+        out.sort((a, b) => (b.jobs_count || 0) - (a.jobs_count || 0));
+        const topN = parseInt(topNSelect.value || "20", 10);
+        if (Number.isFinite(topN) && topN > 0) out = out.slice(0, topN);
+        return out;
+      }
+
+      function filteredCountriesForDisplay(countries) {
+        return visibleCountries(countries);
+      }
+
+      function renderCountryList(countries) {
+        const total = countries.reduce((s, x) => s + (x.jobs_count || 0), 0) || 1;
+        rightHint.textContent = `Distinct jobs: ${total} | Remote jobs: ${currentRemoteJobs}`;
+        countryRows.innerHTML = filteredCountriesForDisplay(countries).map(c => {
+          const pct = Math.round(((c.jobs_count || 0) / total) * 100);
+          const iso2 = (c.country_norm || "").toUpperCase();
+          return `<div class="row" data-iso2="${iso2}"><div class="country-chip">${countryFlagImg(c.country_norm)}<span>${countryText(c.country_norm)}</span></div><div>${c.jobs_count}</div><div class="bar"><i style="width:${pct}%"></i></div></div>`;
+        }).join("");
+
+        [...countryRows.querySelectorAll(".row[data-iso2]")].forEach((row) => {
+          const iso2 = row.dataset.iso2;
+          row.addEventListener("mouseenter", () => {
+            if (!iso2 || iso2 === "UN") return;
+            hoveredIso2 = iso2;
+            refreshMapStyles();
+          });
+          row.addEventListener("mouseleave", () => {
+            hoveredIso2 = null;
+            refreshMapStyles();
+          });
+          row.addEventListener("click", async () => {
+            if (!iso2) return;
+            if (![...countrySelect.options].some(o => o.value === iso2)) return;
+            countrySelect.value = iso2;
+            selectedIso2 = iso2;
+            await loadDashboard();
+          });
+        });
+      }
+
+      function renderTrend(items) {
+        trendSvg.innerHTML = "";
+        if (!items.length) {
+          trendHint.textContent = "No trend data in selected range.";
+          trendSvg.innerHTML = `<text x="20" y="30" fill="#63748e" font-size="13">No data</text>`;
+          return;
+        }
+        const byMonth = {};
+        for (const x of items) byMonth[x.snapshot_month] = (byMonth[x.snapshot_month] || 0) + x.jobs_count;
+        const points = Object.entries(byMonth)
+          .map(([k, v]) => [k, Math.ceil(Number(v || 0))])
+          .sort((a, b) => a[0].localeCompare(b[0]));
+        const maxY = Math.max(...points.map(p => p[1])) || 1;
+        const w = 900, h = 180;
+        const pad = { t: 16, r: 10, b: 30, l: 46 };
+        const pw = w - pad.l - pad.r;
+        const ph = h - pad.t - pad.b;
+        const step = points.length > 1 ? pw / (points.length - 1) : 0;
+        const yToSvg = (v) => pad.t + (ph - ((v / maxY) * ph));
+
+        trendHint.textContent = `Points: ${points.length}, range: ${points[0][0]} to ${points[points.length - 1][0]}, latest: ${fmtNum(points[points.length - 1][1])}`;
+
+        const yTicks = 4;
+        for (let i = 0; i <= yTicks; i++) {
+          const v = (maxY * i) / yTicks;
+          const y = yToSvg(v);
+          trendSvg.innerHTML += `<line x1="${pad.l}" y1="${y}" x2="${w - pad.r}" y2="${y}" stroke="#e6eefb" stroke-width="1"/>`;
+          trendSvg.innerHTML += `<text x="${pad.l - 8}" y="${y + 4}" text-anchor="end" fill="#63748e" font-size="10">${fmtNum(v)}</text>`;
+        }
+
+        const poly = points.map((pt, i) => `${pad.l + i * step},${yToSvg(pt[1])}`).join(" ");
+        trendSvg.innerHTML += `<polyline points="${poly}" fill="none" stroke="#1785ff" stroke-width="2.5" />`;
+
+        points.forEach((pt, i) => {
+          const x = pad.l + i * step;
+          const y = yToSvg(pt[1]);
+          const label = `${pt[0]}: ${fmtNum(pt[1])}`;
+          trendSvg.innerHTML += `<circle cx="${x}" cy="${y}" r="3.2" fill="#1785ff"><title>${label}</title></circle>`;
+          trendSvg.innerHTML += `<circle cx="${x}" cy="${y}" r="10" fill="transparent" data-tip="${label}" data-x="${x}" data-y="${y}"></circle>`;
+
+          if (points.length <= 8 || i % Math.ceil(points.length / 6) === 0 || i === points.length - 1) {
+            trendSvg.innerHTML += `<text x="${x}" y="${h - 10}" text-anchor="middle" fill="#63748e" font-size="10">${pt[0].slice(2, 7)}</text>`;
+          }
+        });
+
+        [...trendSvg.querySelectorAll("circle[data-tip]")].forEach(node => {
+          node.addEventListener("mousemove", (e) => {
+            mapTooltip.style.opacity = 1;
+            mapTooltip.textContent = node.getAttribute("data-tip") || "";
+            mapTooltip.style.left = `${e.clientX + 10}px`;
+            mapTooltip.style.top = `${e.clientY + 10}px`;
+          });
+          node.addEventListener("mouseleave", () => {
+            mapTooltip.style.opacity = 0;
+          });
+        });
+      }
+
+      function ensureMap() {
+        if (map) return;
+        map = L.map("worldMap", { zoomControl: true, worldCopyJump: true, minZoom: 2, maxZoom: 7 }).setView([20, 0], 2);
+        L.tileLayer("https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png", {
+          subdomains: "abcd",
+          attribution: "&copy; OpenStreetMap contributors &copy; CARTO"
+        }).addTo(map);
+      }
+
+      function mapCountryStyle(iso2) {
+        const jobs = iso2 ? (currentCountryJobs[iso2] || 0) : 0;
+        if (!jobs) return { color: "#c7d6eb", weight: 1, fillColor: "#edf1f8", fillOpacity: 0.75 };
+
+        const tRaw = Math.log1p(jobs) / Math.log1p(currentMapMax || 1);
+        const t = 0.28 + (0.72 * tRaw);
+        const r = Math.round(168 - (80 * t));
+        const g = Math.round(206 - (95 * t));
+        const b = Math.round(255 - (40 * t));
+        const isHovered = iso2 && iso2 === hoveredIso2;
+        const isSelected = iso2 && iso2 === selectedIso2;
+        return {
+          color: isSelected ? "#0a57c8" : (isHovered ? "#1f6de0" : "#9fb6da"),
+          weight: isSelected ? 2.4 : (isHovered ? 2.0 : 1.2),
+          fillColor: `rgb(${r}, ${g}, ${b})`,
+          fillOpacity: isSelected ? 0.98 : 0.9,
+        };
+      }
+
+      function refreshMapStyles() {
+        if (!geoLayer) return;
+        geoLayer.eachLayer((layer) => {
+          const iso2 = layer._iso2;
+          layer.setStyle(mapCountryStyle(iso2));
+          if (iso2 && (iso2 === hoveredIso2 || iso2 === selectedIso2)) {
+            layer.bringToFront();
+          }
+        });
+      }
+
+      function renderWorldMap() {
+        if (!worldGeoJson || !window.L) return;
+        ensureMap();
+        if (geoLayer) map.removeLayer(geoLayer);
+        geoLayersByIso2 = {};
+        const vals = Object.values(currentCountryJobs);
+        currentMapMax = vals.length ? Math.max(...vals) : 1;
+        legendMin.textContent = "0"; legendMax.textContent = String(currentMapMax);
+
+        geoLayer = L.geoJSON(worldGeoJson, {
+          style: (f) => {
+            const iso2 = featureIso2(f);
+            return mapCountryStyle(iso2);
+          },
+          onEachFeature: (feature, layer) => {
+            const iso2 = featureIso2(feature);
+            layer._iso2 = iso2;
+            if (iso2) geoLayersByIso2[iso2] = layer;
+            const jobs = iso2 ? (currentCountryJobs[iso2] || 0) : 0;
+            layer.on({
+              mousemove: (e) => {
+                const evt = e.originalEvent;
+                mapTooltip.style.opacity = 1;
+                mapTooltip.textContent = `${featureName(feature)} (${countryText(iso2 || "NA")}): ${jobs}`;
+                mapTooltip.style.left = `${evt.clientX + 10}px`;
+                mapTooltip.style.top = `${evt.clientY + 10}px`;
+                hoveredIso2 = iso2 || null;
+                refreshMapStyles();
+              },
+              mouseout: () => {
+                mapTooltip.style.opacity = 0;
+                hoveredIso2 = null;
+                refreshMapStyles();
+              },
+              click: async () => {
+                if (!iso2) return;
+                if (![...countrySelect.options].some(o => o.value === iso2)) return;
+                countrySelect.value = iso2;
+                selectedIso2 = iso2;
+                await loadDashboard();
+              }
+            });
+          }
+        }).addTo(map);
+        refreshMapStyles();
+      }
+
+      async function loadDashboard() {
+        const companyId = companySelect.value;
+        if (!companyId) return;
+        const trendBaseParams = new URLSearchParams({ company_id: companyId });
+        if (countrySelect.value) trendBaseParams.set("country", countrySelect.value);
+
+        const [current, trendAll] = await Promise.all([
+          getJson(`/v1/companies/${companyId}/locations/current`),
+          getJson(`/v1/trends/countries?${trendBaseParams.toString()}`)
+        ]);
+        syncMonthOptions(trendAll.items || []);
+        enforceMaxRange("to");
+
+        const trendParams = new URLSearchParams(trendBaseParams.toString());
+        if (fromMonthInput.value) trendParams.set("from", fromMonthInput.value);
+        if (toMonthInput.value) trendParams.set("to", toMonthInput.value);
+        const trend = await getJson(`/v1/trends/countries?${trendParams.toString()}`);
+
+        const countries = current.countries || [];
+        currentCountries = countries;
+        const prev = countrySelect.value;
+        const options = hideUnknownInput.checked ? countries.filter(c => c.country_norm !== "UN") : countries;
+        const hasRemote = countries.some(c => c.country_norm === "UN") || Number(current.remote_jobs_count || 0) > 0;
+        const countryOptions = options.filter(c => c.country_norm !== "UN").map(c => `<option value="${c.country_norm}">${countryText(c.country_norm)}</option>`);
+        if (hasRemote) countryOptions.push('<option value="UN">REMOTE</option>');
+        countrySelect.innerHTML = ['<option value="">All Countries</option>'].concat(countryOptions).join("");
+        if (prev && (countries.some(c => c.country_norm === prev) || (prev === "UN" && hasRemote))) countrySelect.value = prev;
+
+        snapshotText.textContent = `Snapshot month: ${current.snapshot_month || "N/A"}`;
+        currentRemoteJobs = Number(current.remote_jobs_count || 0);
+        const visible = filteredCountriesForDisplay(countries);
+        const visibleSet = new Set(visible.map(c => String(c.country_norm || "").toUpperCase()));
+        currentCountryJobs = {};
+        for (const c of countries) {
+          if (hideUnknownInput.checked && c.country_norm === "UN") continue;
+          const iso2 = (c.country_norm || "").toUpperCase();
+          if (!visibleSet.has(iso2)) continue;
+          currentCountryJobs[iso2] = c.jobs_count || 0;
+        }
+        selectedIso2 = countrySelect.value || null;
+        renderCountryList(countries);
+        renderWorldMap();
+        renderTrend(trend.items || []);
+      }
+
+      async function init() {
+        const companies = await getJson("/v1/companies");
+        const items = (companies.items || []).filter(c => String(c.name || "").toLowerCase() !== "tesla");
+        companySelect.innerHTML = items.map(c => `<option value="${c.id}">${c.name}</option>`).join("");
+        if (!items.length) {
+          throw new Error("No companies available after filtering.");
+        }
+        renderCompanyNav(items);
+        worldGeoJson = await getJson("https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json");
+        await loadDashboard();
+      }
+
+      countrySelect.addEventListener("change", loadDashboard);
+      fromMonthInput.addEventListener("change", async () => { enforceMaxRange("from"); await loadDashboard(); });
+      toMonthInput.addEventListener("change", async () => { enforceMaxRange("to"); await loadDashboard(); });
+      hideUnknownInput.addEventListener("change", loadDashboard);
+      topNSelect.addEventListener("change", () => loadDashboard());
+      reloadBtn.addEventListener("click", loadDashboard);
+      resetMapBtn.addEventListener("click", () => {
+        if (!map || !geoLayer) return;
+        map.fitBounds(geoLayer.getBounds(), { padding: [12, 12] });
+      });
+
+      init().catch((e) => { snapshotText.textContent = `Failed: ${e.message}`; });
+    </script>
+  </body>
+</html>

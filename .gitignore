@@ -1,0 +1,22 @@
+# Python cache / virtual env
+.venv/
+__pycache__/
+*.py[cod]
+
+# Local env files
+.env
+.env.*
+
+# Runtime artifacts
+logs/
+*.log
+
+# Local export / snapshot data
+tesla_jobs_*.json
+data/*.json
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
